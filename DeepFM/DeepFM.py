@@ -10,17 +10,8 @@ import tensorflow as tf
 import numpy as np
 from sklearn.metrics import roc_auc_score
 
-
-#def precessing_data(self, continue_data=None, cat_data):
-#        '''
-#        data应该是一个pandas数据框, 返回离散值编码后的数据框和对应的fild索引
-#        '''
-
 class DeepFM():
-    '''
-    输入是一个 N*F的数据框， 其中N是样本个数，F是特征的fild个数，特征包含连续特征和
-    离散特征，但是数据格式要求为连续特征在前，离散特征在后。
-    '''
+    '''DeepFM模型TensorFlow Python实现'''
     
     def __init__(self, feature_size, fild_size, embedding_size=8,
                  deep_layer_size=[50,50,50], activation_function=tf.nn.relu,
@@ -53,21 +44,6 @@ class DeepFM():
                                                mean=0, stddev=0.01), name='FM_embedding')
         weights['FM_linear'] = tf.Variable(tf.random_normal(shape=[self.feature_size, 1]), name='FM_linear')
         
-##        DNN weight
-#        deep_len = len(self.deep_layer_size)
-#        input_size = self.fild_size * self.embedding_size
-#        for i in range( deep_len):
-#            xavier_init = np.sqrt(2 / (input_size+self.deep_layer_size[i]))
-#            weights['deep_layer{}'.format(i+1)] = tf.Variable(tf.random_normal(shape=[input_size, 
-#                                                self.deep_layer_size[i]], mean=0, stddev=xavier_init),
-#                                                name='deep_layer{}'.format(i+1))
-#            weights['deep_bias{}'.format(i+1)] = tf.Variable(tf.zeros([self.deep_layer_size[i]]),
-#                                                           name='deep_bias{}'.format(i+1))
-#            input_size = self.deep_layer_size[i]
-#        weights['deep_output'] = tf.Variable(tf.random_normal(shape=[self.deep_layer_size[-1], 1]),
-#                                           name='deep_output')
-#        weights['deep_output_bias'] = tf.Variable(tf.zeros(shape=[1]), name='deep_output_bias')
-        
         return weights
         
 
@@ -80,7 +56,7 @@ class DeepFM():
         self.feat_value = tf.placeholder(tf.float32, shape=[None, self.fild_size], name='X_value')
         self.y = tf.placeholder(tf.float32, shape=[None, 1], name='y')
         
-#        FM compoent
+#        FM component
 #        linear term
         w = tf.nn.embedding_lookup(self.weights['FM_linear'], self.feat_index) # 应该是None*F*1维的
         feat_value = tf.reshape(self.feat_value, [-1, self.fild_size, 1]) #由None*1*F，变为None*F*1
@@ -130,20 +106,6 @@ class DeepFM():
                                                    activation_fn = tf.identity,
                                                    weights_regularizer = tf.contrib.layers.l2_regularizer(self.l2_reg)
                                                    )    
-        
-        
-#        with tf.variable_scope('deep'):
-#            
-#            input_X = tf.reshape(v, shape=[-1, self.fild_size * self.embedding_size]) # None*(F*k)
-#            for i in range(len(self.deep_layer_size)):
-#                next_layer_input = tf.add(tf.matmul(input_X, self.weights['deep_layer{}'.format(i+1)]),
-#                                    self.weights['deep_bias{}'.format(i+1)])
-#                
-#                layer_output = tf.nn.relu(next_layer_input)
-#                input_X = layer_output
-#        y_deep = tf.add(tf.matmul(input_X, self.weights['deep_output']),
-#                                    self.weights['deep_output_bias']) # None*1
-
 #        FM+DNN
         logit = y_FM + y_deep # None*1
 #        logit = tf.reshape(logit,[-1,1])
@@ -165,45 +127,34 @@ class DeepFM():
         self.sess.run(init)
     
     def train_model(self, X_index, X_value, labels):
-        
+        '''训练模型'''
         for epoch in range(self.epochs):
             for X_index_batch, X_value_batch, y_batch in self.random_shuffle_batch(X_index, X_value, labels):
-                
-                self.sess.run(self.train_op, feed_dict={self.feat_index:X_index_batch, self.feat_value:X_value_batch, self.y:y_batch})
+                self.sess.run(self.train_op, feed_dict={self.feat_index : X_index_batch, 
+                                                        self.feat_value : X_value_batch, 
+                                                        self.y : y_batch })
             loss, auc = self.evaluate(X_index, X_value, labels)
             print(epoch, 'loss:',loss,'auc',auc)
                 
     def evaluate(self, X_index, X_value, labels):
-#        print(X_index, X_value, labels)
-#        print(labels.shape)
-        
-        y_pred, loss = self.sess.run([self.y_pred, self.loss], feed_dict={self.feat_index:X_index, self.feat_value:X_value, self.y:labels})
-        
-#        print(self.sess.run([self.y_linear, self.y_interaction, self.y_pred], feed_dict={self.feat_index:X_index, self.feat_value:X_value}))
+        '''模型评估'''
+        y_pred, loss = self.sess.run([self.y_pred, self.loss], feed_dict={self.feat_index : X_index, 
+                                                                        self.feat_value : X_value, 
+                                                                        self.y : labels})        
         auc = roc_auc_score(labels, y_pred)
         return loss, auc
     
     def predict(self, X_index, X_value):
-        y_pred =self.sess.run(self.y_pred, feed_dict={self.feat_index:X_index, self.feat_value:X_value})
+        '''预测'''
+        y_pred =self.sess.run(self.y_pred, feed_dict={self.feat_index : X_index, 
+                                                    self.feat_value : X_value})
         return y_pred
         
     def random_shuffle_batch(self, X_index, X_value, y):
+        '''随机批量采样'''
         rnd_index = np.random.permutation(len(X_index))
         n_batches = len(X_index) // self.batch_size
         for idx in np.array_split(rnd_index, n_batches):
-            #print(idx, rnd_index, n_batches)
-            #print(X_index, X_value, y)
             X_index_batch, X_value_batch, y_batch = X_index[idx], X_value[idx], y[idx]  
             yield X_index_batch, X_value_batch, y_batch
-        
-#deep_fm = DeepFM(feature_size=6, fild_size=2)
-#feat_index = np.array([[1,3],[2,4],[1,5]])
-#feat_value = np.array([[1,1],[2,2],[1,1]])
-#y = np.array([1,1,0]).reshape([-1,1])
-#
-#test_index = np.array([[0,1],[3,5]])
-#test_value = np.array([[1,1],[1,3]])
-#deep_fm.train_model(feat_index, feat_value , y)
-#print(deep_fm.predict(test_index, test_value))
-#print(deep_fm.predict(feat_index, feat_value))
         
