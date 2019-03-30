@@ -54,6 +54,6 @@ labels = criteo_label.values.reshape([-1,1])
 
 from wide_deep import Wide_Deep
 wide_deep = Wide_Deep(wide_size=wide_size, field_size=field_size, sparse_size=feature_size, 
-    numeric_size=numeric_size, epochs=100)
+    numeric_size=numeric_size, epochs=100, learning_rate=0.005)
 wide_deep.train_model(x_wide, criteo_conti.values, feat_index, feat_value, labels)
 

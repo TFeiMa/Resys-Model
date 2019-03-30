@@ -1,6 +1,8 @@
 import tensorflow as tf
 from sklearn.metrics import roc_auc_score
 import numpy as np
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import control_flow_ops
 
 class Wide_Deep():
 	'''
@@ -40,38 +42,40 @@ class Wide_Deep():
 		self.y = tf.placeholder(tf.float32, shape=[None, 1], name='y')
 
 		# wide component
-		# 初始化wide 的权重
-		w_wide = tf.Variable(tf.random_normal(shape=[self.wide_size, 1]), name='w_wide')
-		logit_wide = tf.matmul(self.x_wide, w_wide)
+		with tf.name_scope('wide'):
+			# 初始化wide 的权重
+			w_wide = tf.Variable(tf.random_normal(shape=[self.wide_size, 1]), name='w_wide')
+			logit_wide = tf.matmul(self.x_wide, w_wide)
 
 		## deep component
-		w_embedding = tf.Variable(tf.random_normal(shape=[self.sparse_size, self.embedding_size],
-													mean=0, stddev=0.01), name='w_embedding')
-		lookup = tf.nn.embedding_lookup(w_embedding, self.x_deep_index)
-		x_deep_value = tf.reshape(self.x_deep_value, [-1, self.field_size, 1])
-		dense_embedding = tf.multiply(lookup, x_deep_value) # None*(embedding_size*field_size)
-		dense_embedding = tf.reshape(dense_embedding, [-1, self.embedding_size*self.field_size])
-		# 将离散特征的嵌入和连续特征连接起来作为网络的输入
-		input_deep = tf.concat([dense_embedding, self.x_deep_numeric], axis=1)
+		with tf.name_scope('deep'):
+			w_embedding = tf.Variable(tf.random_normal(shape=[self.sparse_size, self.embedding_size],
+														mean=0, stddev=0.01), name='w_embedding')
+			lookup = tf.nn.embedding_lookup(w_embedding, self.x_deep_index)
+			x_deep_value = tf.reshape(self.x_deep_value, [-1, self.field_size, 1])
+			dense_embedding = tf.multiply(lookup, x_deep_value) # None*(embedding_size*field_size)
+			dense_embedding = tf.reshape(dense_embedding, [-1, self.embedding_size*self.field_size])
+			# 将离散特征的嵌入和连续特征连接起来作为网络的输入
+			input_deep = tf.concat([dense_embedding, self.x_deep_numeric], axis=1)
 
-		self.is_training = tf.placeholder_with_default(False, shape=(), name='is_training')
-		bn_params = {
-		'is_training': self.is_training,
-		'decay': 0.995,
-		'updates_collections': None
-		}
-		for i in range(len(self.deep_size)):
-			hidden_bn = tf.contrib.layers.fully_connected(inputs=input_deep,
-														num_outputs=self.deep_size[i],
-														normalizer_fn=tf.contrib.layers.batch_norm,
-														normalizer_params=bn_params,
-														weights_regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg))
-			input_deep = hidden_bn
+			self.is_training = tf.placeholder_with_default(False, shape=(), name='is_training')
+			bn_params = {
+			'is_training': self.is_training,
+			'decay': 0.995,
+			'updates_collections': None
+			}
+			for i in range(len(self.deep_size)):
+				hidden_bn = tf.contrib.layers.fully_connected(inputs=input_deep,
+															num_outputs=self.deep_size[i],
+															normalizer_fn=tf.contrib.layers.batch_norm,
+															normalizer_params=bn_params,
+															weights_regularizer=tf.contrib.layers.l2_regularizer(self.l2_reg))
+				input_deep = hidden_bn
 
-		# deep 侧输出层权重和bias
-		w_deep_output = tf.Variable(tf.random_normal(shape=[self.deep_size[-1], 1]), name='w_deep_output', dtype=tf.float32)
-		bias = tf.Variable(tf.zeros([1], dtype=tf.float32))
-		logit_deep = tf.matmul(input_deep, w_deep_output)
+			# deep 侧输出层权重和bias
+			w_deep_output = tf.Variable(tf.random_normal(shape=[self.deep_size[-1], 1]), name='w_deep_output', dtype=tf.float32)
+			bias = tf.Variable(tf.zeros([1], dtype=tf.float32))
+			logit_deep = tf.matmul(input_deep, w_deep_output)
 
 		logit = logit_wide + logit_deep + bias
 		logit = tf.reshape(logit,[-1,1])
@@ -82,9 +86,16 @@ class Wide_Deep():
 		self.loss = tf.reduce_mean(entropy) + self.l2_reg*(tf.nn.l2_loss(w_embedding) + tf.nn.l2_loss(w_deep_output))
 
 		# optimizer
-		self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+		self.wide_optimizer = tf.train.FtrlOptimizer(learning_rate=self.learning_rate)
+		self.deep_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
 												beta1=0.9, beta2=0.999, epsilon=1e-8)
-		self.train_op = self.optimizer.minimize(self.loss)
+		train_op = [self.wide_optimizer.minimize(self.loss, var_list=ops.get_collection(
+														ops.GraphKeys.TRAINABLE_VARIABLES,
+														scope='wide')),
+				self.deep_optimizer.minimize(self.loss, var_list=ops.get_collection(
+														ops.GraphKeys.TRAINABLE_VARIABLES,
+														scope='deep'))]
+		self.train_op = control_flow_ops.group(*train_op)						
 
 		# 建立一个session
 		init = tf.global_variables_initializer()
